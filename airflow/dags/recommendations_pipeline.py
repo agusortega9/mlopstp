@@ -1,9 +1,29 @@
 from datetime import datetime
 import pandas as pd
+import boto3
+import psycopg2
 from airflow.sdk import dag, task
+from airflow.models import Variable
+from io import StringIO
 
-# Ruta local donde pusiste los CSV
-LOCAL_DATA_PATH = "/home/agust/MLOps_TP"   # <-- CAMBIAR A TU PATH REAL
+
+# ----------------------------
+# Helper: leer CSV desde S3
+# ----------------------------
+def read_csv_from_s3(bucket: str, key: str):
+    s3 = boto3.client("s3")
+
+    obj = s3.get_object(Bucket=bucket, Key=key)
+    data = obj["Body"].read().decode("utf-8")
+
+    return pd.read_csv(StringIO(data))
+
+
+# ----------------------------
+# DAG
+# ----------------------------
+BUCKET = "grupo-5-2025"
+
 
 @dag(
     dag_id="recommendations_pipeline",
@@ -13,38 +33,37 @@ LOCAL_DATA_PATH = "/home/agust/MLOps_TP"   # <-- CAMBIAR A TU PATH REAL
 )
 def recommendations_pipeline():
 
-    # ------------------------------
-    # TAREA 1: Filtrar Advertisers Activos
-    # ------------------------------
+    # -------------------------
+    # TAREA 1 — Filtrar Datos
+    # -------------------------
     @task
     def filtrar_datos():
-        active = pd.read_csv(f"{LOCAL_DATA_PATH}/advertiser_ids")
-        df_products = pd.read_csv(f"{LOCAL_DATA_PATH}/product_views")
-        df_ads = pd.read_csv(f"{LOCAL_DATA_PATH}/ads_views")
 
-        df_products = df_products[df_products["advertiser_id"].isin(active["advertiser_id"])]
-        df_ads = df_ads[df_ads["advertiser_id"].isin(active["advertiser_id"])]
+        df_active = read_csv_from_s3(BUCKET, "advertiser_ids")
+        df_products = read_csv_from_s3(BUCKET, "product_views")
+        df_ads = read_csv_from_s3(BUCKET, "ads_views")
 
-        filtered_products_path = f"{LOCAL_DATA_PATH}/filtered_product_views.csv"
-        filtered_ads_path = f"{LOCAL_DATA_PATH}/filtered_ads_views.csv"
+        df_products = df_products[
+            df_products["advertiser_id"].isin(df_active["advertiser_id"])
+        ]
 
-        df_products.to_csv(filtered_products_path, index=False)
-        df_ads.to_csv(filtered_ads_path, index=False)
+        df_ads = df_ads[
+            df_ads["advertiser_id"].isin(df_active["advertiser_id"])
+        ]
 
         return {
-            "products": filtered_products_path,
-            "ads": filtered_ads_path
+            "products": df_products.to_dict(orient="records"),
+            "ads": df_ads.to_dict(orient="records")
         }
 
-    # ------------------------------
-    # TAREA 2: Top CTR
-    # ------------------------------
+    # -------------------------
+    # TAREA 2 — TopCTR
+    # -------------------------
     @task
-    def top_ctr(paths: dict):
+    def top_ctr(data: dict):
 
-        df = pd.read_csv(paths["ads"])
+        df = pd.DataFrame(data["ads"])
 
-        # CTR = clicks / impressions
         df["click"] = (df["type"] == "click").astype(int)
         df["imp"] = (df["type"] == "impression").astype(int)
 
@@ -55,25 +74,28 @@ def recommendations_pipeline():
 
         grouped["ctr"] = grouped["clicks"] / grouped["impressions"].replace(0, 1)
 
-        top_ctr = (
-            grouped
-            .sort_values(["advertiser_id", "ctr"], ascending=[True, False])
+        top = (
+            grouped.sort_values(["advertiser_id", "ctr"], ascending=[True, False])
             .groupby(level=0)
             .head(20)
             .reset_index()
         )
 
-        out_path = f"{LOCAL_DATA_PATH}/top_ctr.csv"
-        top_ctr.to_csv(out_path, index=False)
-        return out_path
+        # Return dict → {adv: [(product, ctr), ...], ...}
+        result = {}
+        for row in top.itertuples(index=False):
+            adv = row.advertiser_id
+            result.setdefault(adv, []).append((row.product_id, float(row.ctr)))
 
-    # ------------------------------
-    # TAREA 3: Top Product (más vistos)
-    # ------------------------------
+        return result
+
+    # -------------------------
+    # TAREA 3 — TopProduct
+    # -------------------------
     @task
-    def top_product(paths: dict):
+    def top_product(data: dict):
 
-        df = pd.read_csv(paths["products"])
+        df = pd.DataFrame(data["products"])
 
         top = (
             df.groupby(["advertiser_id", "product_id"])
@@ -84,26 +106,59 @@ def recommendations_pipeline():
             .head(20)
         )
 
-        out_path = f"{LOCAL_DATA_PATH}/top_product.csv"
-        top.to_csv(out_path, index=False)
-        return out_path
+        result = {}
+        for row in top.itertuples(index=False):
+            adv = row.advertiser_id
+            result.setdefault(adv, []).append((row.product_id, int(row.views)))
 
-    # ------------------------------
-    # TAREA 4: DB Writing (aun NO escribe en RDS localmente)
-    # ------------------------------
+        return result
+
+    # -------------------------
+    # TAREA 4 — Escribir en RDS
+    # -------------------------
     @task
-    def write_to_db(top_ctr_path, top_product_path):
+    def write_db(topctr: dict, topproduct: dict, **context):
 
-        print("Simulación: escribiríamos en PostgreSQL RDS")
-        print(f"TopCTR → {top_ctr_path}")
-        print(f"TopProduct → {top_product_path}")
-        # TODO: agregar psycopg2 más adelante cuando configures RDS
+        conn = psycopg2.connect(
+            host=Variable.get("RDS_HOST"),
+            port=5432,
+            user=Variable.get("RDS_USER"),
+            password=Variable.get("RDS_PASSWORD"),
+            dbname=Variable.get("RDS_DBNAME"),
+        )
+        cursor = conn.cursor()
 
-    # DAG FLOW
+        insert_sql = """
+        INSERT INTO recommendations (advertiser_id, model, product_id, score, date)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (advertiser_id, model, product_id, date)
+        DO UPDATE SET score = EXCLUDED.score;
+        """
+
+        today = context["ds"]
+
+        # ---- Insert TopCTR
+        for adv, recs in topctr.items():
+            for product, score in recs:
+                cursor.execute(insert_sql, (adv, "TopCTR", product, score, today))
+
+        # ---- Insert TopProduct
+        for adv, recs in topproduct.items():
+            for product, score in recs:
+                cursor.execute(insert_sql, (adv, "TopProduct", product, score, today))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+    # -------------------------
+    # FLOW
+    # -------------------------
+
     filtered = filtrar_datos()
     ctr = top_ctr(filtered)
-    top = top_product(filtered)
-    write_to_db(ctr, top)
+    tp = top_product(filtered)
+    write_db(ctr, tp)
 
 
 recommendations_pipeline()
