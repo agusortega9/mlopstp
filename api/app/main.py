@@ -1,19 +1,34 @@
 from fastapi import FastAPI
-import pandas as pd
-import numpy as np
-import requests
+import psycopg2
+import os
 
-app = FastAPI(title="TP MLOps - Sistema de Anuncios")
+app = FastAPI()
 
-@app.get("/anuncios")
-def obtener_anuncios(usuario_id: int = 1):
-    # Simulación de recomendaciones de anuncios
-    df = pd.DataFrame({
-        "anuncio_id": [101, 102, 103],
-        "score": np.random.rand(3)
-    }).sort_values("score", ascending=False)
+def get_conn():
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST"),
+        database=os.getenv("DB_NAME"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASS"),
+        port=5432
+    )
 
-    return {
-        "usuario": usuario_id,
-        "recomendaciones": df.to_dict(orient="records")
-    }
+@app.get("/recommendations/{adv}/{model}")
+def get_reco(adv: str, model: str):
+
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    cur.execute("""
+        SELECT product_id, score 
+        FROM recommendations 
+        WHERE advertiser_id = %s AND model = %s
+        ORDER BY score DESC
+        LIMIT 20;
+    """, (adv, model))
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return {"advertiser_id": adv, "model": model, "recommendations": rows}
