@@ -13,6 +13,10 @@ def get_conn():
         port=5432
     )
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 @app.get("/recommendations/{adv}/{model}")
 def get_reco(adv: str, model: str):
 
