@@ -1,19 +1,26 @@
 # TP MLOps - Servicio de Anuncios
 
-Este proyecto expone un endpoint FastAPI que entrega anuncios recomendados.
-
+## API
+## Despues de actualizar el repositorio en EC2:
 ## Cómo construir la imagen
-
 ```bash
-docker build -t anuncios-mlops .
+docker build -t grupo-5-api:latest .
 ```
 
-## Cómo ejecutar
-
+## Loguearse en ECR (cambiar el account ID si es necesario)
 ```bash
-docker run -p 8000:8000 anuncios-mlops
+aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 396913735447.dkr.ecr.us-east-2.amazonaws.com
 ```
 
-## Endpoint
+## Taggear la imagen 
+```bash
+docker tag grupo-5-api:latest \
+396913735447.dkr.ecr.us-east-2.amazonaws.com/grupo-5-api:latest
+```
 
-- GET `/anuncios?usuario_id=123`
+## Pushear a ECR
+```bash
+docker push 396913735447.dkr.ecr.us-east-2.amazonaws.com/grupo-5-api:latest
+```
+
+## Actualizar el deploy de App Runner desde la UI de AWS 
