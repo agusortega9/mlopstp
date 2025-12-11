@@ -39,31 +39,28 @@ def recommendations_pipeline():
     # -------------------------
     @task
     def filtrar_datos():
-
         df_active = read_csv_from_s3(BUCKET, "advertiser_ids")
         df_products = read_csv_from_s3(BUCKET, "product_views")
         df_ads = read_csv_from_s3(BUCKET, "ads_views")
 
-        df_products = df_products[
-            df_products["advertiser_id"].isin(df_active["advertiser_id"])
-        ]
+        df_products = df_products[df_products["advertiser_id"].isin(df_active["advertiser_id"])]
+        df_ads = df_ads[df_ads["advertiser_id"].isin(df_active["advertiser_id"])]
 
-        df_ads = df_ads[
-            df_ads["advertiser_id"].isin(df_active["advertiser_id"])
-        ]
+        path_prod = "/tmp/products_filtered.csv"
+        path_ads = "/tmp/ads_filtered.csv"
 
-        return {
-            "products": df_products.to_dict(orient="records"),
-            "ads": df_ads.to_dict(orient="records")
-        }
+        df_products.to_csv(path_prod, index=False)
+        df_ads.to_csv(path_ads, index=False)
+
+        return {"products_path": path_prod, "ads_path": path_ads}
 
     # -------------------------
     # TAREA 2 — TopCTR
     # -------------------------
     @task
-    def top_ctr(data: dict):
+    def top_ctr(paths: dict):
 
-        df = pd.DataFrame(data["ads"])
+        df = pd.read_csv(paths["ads_path"])
 
         df["click"] = (df["type"] == "click").astype(int)
         df["imp"] = (df["type"] == "impression").astype(int)
@@ -82,11 +79,8 @@ def recommendations_pipeline():
             .reset_index()
         )
 
-        # Return dict → {adv: [(product, ctr), ...], ...}
-        result = {}
-        for row in top.itertuples(index=False):
-            adv = row.advertiser_id
-            result.setdefault(adv, []).append((row.product_id, float(row.ctr)))
+        # return lightweight
+        result = top.to_dict(orient="list")
 
         return result
 
@@ -94,9 +88,8 @@ def recommendations_pipeline():
     # TAREA 3 — TopProduct
     # -------------------------
     @task
-    def top_product(data: dict):
-
-        df = pd.DataFrame(data["products"])
+    def top_product(paths: dict):
+        df = pd.read_csv(paths["products_path"])
 
         top = (
             df.groupby(["advertiser_id", "product_id"])
@@ -107,12 +100,7 @@ def recommendations_pipeline():
             .head(20)
         )
 
-        result = {}
-        for row in top.itertuples(index=False):
-            adv = row.advertiser_id
-            result.setdefault(adv, []).append((row.product_id, int(row.views)))
-
-        return result
+        return top.to_dict(orient="list")
 
     # -------------------------
     # TAREA 4 — Escribir en RDS
