@@ -11,13 +11,17 @@ from io import StringIO
 # Helper: leer CSV desde S3
 # ----------------------------
 def read_csv_from_s3(bucket: str, key: str):
-    s3 = boto3.client("s3")
-
+    access = Variable.get("AWS_ACCESS_KEY_ID")
+    secret = Variable.get("AWS_SECRET_ACCESS_KEY")
+    s3 = boto3.client(
+            "s3",
+            aws_access_key_id=access,
+            aws_secret_access_key=secret
+        )
     obj = s3.get_object(Bucket=bucket, Key=key)
     data = obj["Body"].read().decode("utf-8")
 
     return pd.read_csv(StringIO(data))
-
 
 # ----------------------------
 # DAG
