@@ -27,9 +27,10 @@ BUCKET = "grupo-5-2025"
 
 @dag(
     dag_id="recommendations_pipeline",
-    start_date=datetime(2024, 1, 1),
+    start_date=datetime(2025, 11, 14),
     schedule="0 2 * * *",   # corre todos los días a las 02:00
     catchup=False,
+    max_active_runs = 1
 )
 def recommendations_pipeline():
 
