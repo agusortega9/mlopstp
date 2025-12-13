@@ -1,10 +1,14 @@
-FROM python:3.12-slim-bullseye
+FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY app/ /app/
+# Install system dependencies if needed (usually psycopg2-binary handles this, but good practice)
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev && rm -rf /var/lib/apt/lists/*
 
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
 
 EXPOSE 8000
 
