@@ -18,10 +18,10 @@ DB_PORT = "5432"
 def get_db_connection():
     try:
         conn = psycopg2.connect(
-            host=DB_HOST,
-            database=DB_NAME,
-            user=DB_USER,
-            password=DB_PASS,
+            host=os.getenv("DB_HOST"),
+            database=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASS"),
             port=DB_PORT,
             cursor_factory=RealDictCursor
         )
