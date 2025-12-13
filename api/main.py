@@ -4,14 +4,15 @@ from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
 from typing import List
 from datetime import date
+import os
 
 app = FastAPI(title="AdTech Recommendations API")
 
 # --- DATABASE CONFIG ---
-DB_HOST = "grupo-5-2025-database.cpomi0gaon83.us-east-2.rds.amazonaws.com"
-DB_NAME = "postgres"
-DB_USER = "postgres"
-DB_PASS = "postgres"
+DB_HOST = os.getenv("DB_HOST")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASS = os.getenv("DB_PASS")
 DB_PORT = "5432"
 
 def get_db_connection():
