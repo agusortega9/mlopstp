@@ -18,10 +18,10 @@ DB_PORT = "5432"
 def get_db_connection():
     try:
         conn = psycopg2.connect(
-            host=os.getenv("DB_HOST"),
-            database=os.getenv("DB_NAME"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASS"),
+            host="grupo-5-2025-database.cpomi0gaon83.us-east-2.rds.amazonaws.com",
+            database="postgres",
+            user="postgres",
+            password="postgres",
             port=DB_PORT,
             cursor_factory=RealDictCursor
         )
